@@ -1,132 +1,97 @@
-"""Utility helpers used across the project."""
-
+"""
+For building an agent that can find and fix bugs in code.
+This file has simple functions that the agent will review and improve.
+"""
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
-from typing import Union
+from typing import Iterable
 
 
-# ---------------------------------------------------------------------------
-# calculate_average
-# ---------------------------------------------------------------------------
-
-def calculate_average(numbers: Iterable[Union[int, float]]) -> float:
+def calculate_average(numbers: Iterable[int | float]) -> float:
     """Return the arithmetic mean of *numbers*.
 
     Args:
-        numbers: An iterable of numeric values (``int`` or ``float``).
-                 Strings and other non-numeric types are rejected even if
-                 they look like numbers.
+        numbers: An iterable of real (int or float) values. Generators accepted.
 
     Returns:
-        The arithmetic mean as a ``float``.
+        The arithmetic mean as a float.
 
     Raises:
-        TypeError:  If *numbers* is ``None`` or not iterable, or if any
-                    element is not an ``int`` or ``float`` (``bool`` values
-                    are also rejected even though they are a subclass of
-                    ``int``).
-        ValueError: If *numbers* is empty, or if any element is ``NaN`` or
-                    infinite (``float('nan')``, ``float('inf')``,
-                    ``float('-inf')``).  These IEEE 754 special values would
-                    silently corrupt the computed mean.
-
-    Examples:
-        >>> calculate_average([1, 2, 3])
-        2.0
-        >>> calculate_average([])
-        Traceback (most recent call last):
-            ...
-        ValueError: numbers must not be empty
+        TypeError:  *numbers* is None, not iterable, or contains bool /
+                    non-numeric elements.
+        ValueError: *numbers* is empty, or contains NaN or infinite values.
     """
     if numbers is None:
-        raise TypeError("numbers must not be None")
-    if isinstance(numbers, str):
-        # A string is technically iterable but clearly wrong here.
+        raise TypeError("None is not a valid input; expected an iterable of numbers.")
+
+    # Materialise generators so we can validate, count, and sum in one pass.
+    try:
+        items = list(numbers)
+    except TypeError:
         raise TypeError(
-            f"numbers must be an iterable of numeric values, got str"
-        )
-    if not isinstance(numbers, Iterable):
-        raise TypeError(
-            f"numbers must be an iterable, got {type(numbers).__name__}"
+            f"Expected an iterable of numbers, got {type(numbers).__name__!r}."
         )
 
-    validated: list[Union[int, float]] = []
-    for i, num in enumerate(numbers):
-        # Check bool first: bool is a subclass of int so the isinstance guard
-        # below would accept True/False silently without this early exit.
+    if len(items) == 0:
+        raise ValueError("Cannot calculate average of an empty sequence.")
+
+    total = 0.0
+    for i, num in enumerate(items):
+        # bool is a subclass of int in Python — reject it explicitly.
         if isinstance(num, bool):
             raise TypeError(
-                f"All elements must be int or float; "
-                f"element at index {i} is bool: {num!r}"
+                f"Element at index {i} is bool ({num!r}); "
+                "only int and float values are accepted."
             )
         if not isinstance(num, (int, float)):
             raise TypeError(
-                f"All elements must be int or float; "
-                f"element at index {i} is {type(num).__name__!r}: {num!r}"
+                f"Element at index {i} is {type(num).__name__!r} ({num!r}); "
+                "only int and float values are accepted."
             )
-        # Reject IEEE 754 special values that would silently corrupt the mean.
-        if isinstance(num, float) and math.isnan(num):
+        if math.isnan(num):
             raise ValueError(
-                f"All elements must be finite numbers; "
-                f"element at index {i} is NaN"
+                f"Element at index {i} contains NaN, which is not a valid number."
             )
-        if isinstance(num, float) and math.isinf(num):
+        if math.isinf(num):
             raise ValueError(
-                f"All elements must be finite numbers; "
-                f"element at index {i} is infinite: {num!r}"
+                f"Element at index {i} is infinite, which is not a valid number."
             )
-        validated.append(num)
+        total += num
 
-    if not validated:
-        raise ValueError("numbers must not be empty")
+    return total / len(items)
 
-    # math.fsum gives exact floating-point summation (no accumulated error).
-    return math.fsum(validated) / len(validated)
-
-
-# ---------------------------------------------------------------------------
-# get_user_name
-# ---------------------------------------------------------------------------
 
 def get_user_name(user: dict) -> str:
-    """Return the uppercased name from a *user* mapping.
+    """Return the upper-cased name stored in *user*.
 
     Args:
-        user: A ``dict`` that must contain a ``"name"`` key whose value is
-              a non-empty ``str``.
+        user: A dict that must contain a non-empty string under the key ``"name"``.
 
     Returns:
-        The uppercased user name.
+        The user's name converted to upper case.
 
     Raises:
-        TypeError:  If *user* is ``None``, not a ``dict``, or if
-                    ``user["name"]`` is not a ``str``.
-        KeyError:   If *user* does not contain the ``"name"`` key.
-        ValueError: If ``user["name"]`` is an empty or whitespace-only string.
-
-    Examples:
-        >>> get_user_name({"name": "alice"})
-        'ALICE'
+        TypeError:   *user* is None, not a dict, or ``user["name"]`` is not a str.
+        KeyError:    ``"name"`` key is absent from *user*.
+        ValueError:  ``user["name"]`` is an empty or whitespace-only string.
     """
     if user is None:
-        raise TypeError("user must not be None")
+        raise TypeError("None is not a valid user; expected a dict.")
     if not isinstance(user, dict):
         raise TypeError(
-            f"user must be a dict, got {type(user).__name__!r}"
+            f"Expected a dict for 'user', got {type(user).__name__!r}."
         )
-    if "name" not in user:
-        raise KeyError("user dict must contain a 'name' key")
 
-    name = user["name"]
-    if name is None:
-        raise TypeError("user['name'] must not be None")
+    name = user["name"]  # raises KeyError naturally if the key is missing
+
     if not isinstance(name, str):
         raise TypeError(
-            f"user['name'] must be a str, got {type(name).__name__!r}: {name!r}"
+            f"'name' must be a string, got {type(name).__name__!r} ({name!r})."
         )
     if not name.strip():
-        raise ValueError("user['name'] must not be empty or whitespace-only")
+        raise ValueError(
+            f"'name' must not be empty or whitespace-only, got {name!r}."
+        )
 
     return name.upper()

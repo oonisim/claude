@@ -22,8 +22,11 @@ from util_claude.common import summarise_tool_input
 
 logger = logging.getLogger(__name__)
 
-# Display width for plan boxes and context bars.
-_W: int = 60
+# Inner display width (characters) for execution-plan boxes and context bars.
+# Each box border adds 2 characters (╔…╗), so the total printed width is
+# EXECUTION_PLAN_BOX_WIDTH + 2.  80 matches the conventional terminal column
+# count and gives plan steps enough room to be readable without wrapping.
+EXECUTION_PLAN_BOX_WIDTH: int = 80
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +72,8 @@ _EXPLAIN_PROMPT: str = (
 # Execution plan tracker
 # ---------------------------------------------------------------------------
 
-class _PlanTracker:
-    """Tracks the agent's execution plan extracted from ExitPlanMode calls.
+class AgentExecutionPlanTracker:
+    """Tracks the agent's execution plan extracted from ``ExitPlanMode`` calls.
 
     ExitPlanMode.input carries two fields used here:
 
@@ -214,24 +217,25 @@ class _PlanTracker:
             changed: Set to ``True`` when a prior plan exists and the new
                 plan differs — indicates the agent revised its plan.
         """
-        bar_top = f"╔{'═' * _W}╗"
-        bar_mid = f"╠{'─' * _W}╣"
-        bar_bot = f"╚{'═' * _W}╝"
+        bar_top = f"╔{'═' * EXECUTION_PLAN_BOX_WIDTH}╗"
+        bar_mid = f"╠{'─' * EXECUTION_PLAN_BOX_WIDTH}╣"
+        bar_bot = f"╚{'═' * EXECUTION_PLAN_BOX_WIDTH}╝"
 
+        W = EXECUTION_PLAN_BOX_WIDTH
         if changed:
-            print(f"\n{'━' * (_W + 2)}")
+            print(f"\n{'━' * (W + 2)}")
             print(f"  ⚠  PLAN UPDATED — agent has revised the execution plan")
-            print(f"{'━' * (_W + 2)}")
+            print(f"{'━' * (W + 2)}")
 
         print(f"\n{bar_top}")
         header = f"  EXECUTION PLAN  ·  {self.title}"
-        print(f"║{header:<{_W}}║")
+        print(f"║{header:<{W}}║")
         print(bar_mid)
 
         col = f"  {'Step':<8}{'Tool':<14}Action"
-        print(f"║{col:<{_W}}║")
-        div = f"  {'─'*6}  {'─'*12}  {'─' * (_W - 24)}"
-        print(f"║{div:<{_W}}║")
+        print(f"║{col:<{W}}║")
+        div = f"  {'─'*6}  {'─'*12}  {'─' * (W - 24)}"
+        print(f"║{div:<{W}}║")
 
         for i, (tool_type, desc) in enumerate(self._steps):
             if i < self._current:
@@ -242,7 +246,7 @@ class _PlanTracker:
                 marker = " "
             num = f"{i + 1}."
             line = f"  {marker} {num:<5}  {tool_type:<12}  {desc}"
-            print(f"║{line:<{_W}}║")
+            print(f"║{line:<{W}}║")
 
         print(f"{bar_bot}\n")
 
@@ -264,9 +268,10 @@ class _PlanTracker:
 
         matched = self._find_step(tool_name)
 
-        bar = "─" * _W
+        bar = "─" * EXECUTION_PLAN_BOX_WIDTH
+        W = EXECUTION_PLAN_BOX_WIDTH
         title_disp = (
-            self.title[:_W - 9] + "…" if len(self.title) > _W - 9 else self.title
+            self.title[:W - 9] + "…" if len(self.title) > W - 9 else self.title
         )
         print(f"  {bar}")
         print(f"  Plan: {title_disp}")
@@ -417,7 +422,7 @@ def make_approval_callback(
         An async callable matching the ``CanUseTool`` signature:
         ``(tool_name, tool_input, context) -> PermissionResult``.
     """
-    _tracker = _PlanTracker()
+    _tracker = AgentExecutionPlanTracker()
 
     async def _callback(
         tool_name: str,

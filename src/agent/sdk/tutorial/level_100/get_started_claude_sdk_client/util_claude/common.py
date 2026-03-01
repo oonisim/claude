@@ -60,6 +60,15 @@ Three groups of helpers:
    so ``logger.info`` output is informative without being verbose.
 """
 
+try:
+    import pysbd as _pysbd
+    # Segmenter is expensive to construct; build it once at module load.
+    # clean=False preserves leading/trailing whitespace in each segment so
+    # the caller can strip as needed without losing boundary information.
+    _SENTENCE_SEGMENTER = _pysbd.Segmenter(language="en", clean=False)
+except ImportError:  # pragma: no cover
+    _SENTENCE_SEGMENTER = None  # type: ignore[assignment]
+
 from claude_agent_sdk import (
     AssistantMessage,
     TextBlock,
@@ -364,11 +373,57 @@ def tool_name_map(msg: AssistantMessage) -> dict[str, str]:
 #
 # Format:
 #   AssistantMessage — Run Tool: Read(utils.py)
-#   UserMessage      — Read OK: <first 60 chars of output>
+#   UserMessage      — Read OK: <first sentence of output, ≤ max_chars>
 # ---------------------------------------------------------------------------
 
 # Maximum characters shown for the key argument in a tool call label.
 _MAX_KEY_ARG_CHARS: int = 50
+
+
+def _first_sentence(text: str, max_chars: int) -> tuple[str, bool]:
+    """Return the first natural sentence of *text*, truncated at *max_chars*.
+
+    Newlines in *text* are collapsed to spaces before segmentation so the
+    result is always a single-line string.
+
+    The algorithm:
+
+    1. If the flattened text fits within *max_chars*, return it as-is
+       (``more=False``).
+    2. Try ``pysbd`` sentence-boundary detection.  If the first segment fits
+       within *max_chars*, return it (``more=True`` because the original text
+       was longer).
+    3. Fall back to the last **word boundary** (space) before *max_chars* so
+       the snippet never ends mid-word.  If no space exists, fall back to a
+       hard character slice.
+
+    Args:
+        text: Source text (may contain newlines).
+        max_chars: Maximum characters in the returned snippet.
+
+    Returns:
+        ``(snippet, more)`` where *more* is ``True`` when the original text
+        contained additional content not shown in the snippet.
+    """
+    flat = text.replace("\n", " ")
+    if len(flat) <= max_chars:
+        return flat, False
+    if _SENTENCE_SEGMENTER is not None:
+        try:
+            sentences = _SENTENCE_SEGMENTER.segment(flat)
+            if sentences:
+                first = sentences[0].rstrip()
+                if len(first) <= max_chars:
+                    return first, True  # original had more content
+        except Exception:
+            pass
+    # Fallback: cut at the last word boundary before max_chars so the snippet
+    # does not end mid-word.
+    candidate = flat[:max_chars]
+    last_space = candidate.rfind(" ")
+    if last_space > max_chars // 2:
+        return candidate[:last_space], True
+    return candidate, True
 
 
 def _tool_key_arg(name: str, inp: dict) -> str:
@@ -395,7 +450,14 @@ def _tool_key_arg(name: str, inp: dict) -> str:
     if tool == "bash":
         val = inp.get("command", "")
     elif tool in ("read", "edit", "write", "multiedit"):
-        val = inp.get("file_path", "")
+        # For file paths, prefer showing the last two path components
+        # (e.g. "util_claude/common.py") over a mid-path character slice.
+        path = inp.get("file_path", "")
+        if len(path) > _MAX_KEY_ARG_CHARS:
+            parts = path.replace("\\", "/").split("/")
+            short = "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+            return f"…/{short}"
+        return path
     elif tool == "exitplanmode":
         return ""
     else:
@@ -438,9 +500,9 @@ def assistant_message_oneliner(msg: AssistantMessage) -> str:
             calls.append(f"{b.name}({key})" if key else b.name)
         parts.append(f"{label}: {', '.join(calls)}")
     if texts:
-        # TextBlock.text — first 80 chars of Claude's prose, newlines collapsed
-        snippet = texts[0][:80].replace("\n", " ")
-        ellipsis = "…" if len(texts[0]) > 80 else ""
+        # TextBlock.text — up to the first natural sentence (≤ 80 chars).
+        snippet, more = _first_sentence(texts[0], 80)
+        ellipsis = "…" if more else ""
         parts.append(f'says: "{snippet}{ellipsis}"')
     return " | ".join(parts) if parts else "(no content)"
 
@@ -500,8 +562,10 @@ def user_message_oneliner(
         status = "ERROR" if b.is_error else "OK"
         prefix = f"{tool} {status}" if tool else status
         content = str(b.content or "")
-        snippet = content[:60].replace("\n", " ")
-        ellipsis = "…" if len(content) > 60 else ""
+        # Use sentence-boundary detection so the snippet ends at a natural
+        # sentence boundary rather than a mid-word character slice.
+        snippet, more = _first_sentence(content, 60)
+        ellipsis = "…" if more else ""
         entry = f"{prefix}: {snippet}{ellipsis}" if snippet else prefix
         parts.append(entry)
     return ", ".join(parts)
