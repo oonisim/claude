@@ -43,11 +43,20 @@ def __init__(
 import argparse
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from typing import (
     Literal,
     Union,
 )
+
+# Resolve util_claude from the shared lib submodule so this script always uses
+# the canonical library rather than a local copy.
+# Layout: <repo_root>/lib/code/python/lib/util_claude
+#   main.py lives 6 levels below the repo root (parents[6]).
+_LIB_PATH = str(Path(__file__).parents[6] / "lib" / "code" / "python" / "lib")
+if _LIB_PATH not in sys.path:
+    sys.path.insert(0, _LIB_PATH)
 
 from claude_agent_sdk import (
     AssistantMessage,
